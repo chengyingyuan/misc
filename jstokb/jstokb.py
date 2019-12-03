@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+#
+# Ref. https://github.com/tuomasjjrasanen/python-uinput
+#
+
 import pygame
 import uinput
 import time
@@ -22,9 +26,10 @@ BUTTON_MAP = {
   "CROSS": uinput.KEY_DOWN,
   "LAXIS": uinput.BTN_LEFT,
   "RAXIS": uinput.BTN_RIGHT,
-  "R1": uinput.KEY_F11,
+  "L1": uinput.KEY_F11,
   "R2": uinput.BTN_MIDDLE,
 }
+BUTTON_WHEEL = "R1" # Button to enable wheel
 AXIS_MAP = {
   0: uinput.REL_X,
   1: uinput.REL_Y,
@@ -38,7 +43,7 @@ HAT_MAP = {
   "DOWN": uinput.KEY_DOWN,
 }
 
-EVENTS = list(BUTTON_MAP.values()) + list(AXIS_MAP.values())
+EVENTS = list(BUTTON_MAP.values()) + list(AXIS_MAP.values()) + [uinput.REL_WHEEL,]
 keydev = uinput.Device(EVENTS)
 pygame.init()
 
@@ -74,13 +79,22 @@ print("Number of buttons: {}".format(buttons))
 hats = joystick.get_numhats()
 print("Number of hats: {}".format(hats))
 
+btn_wheeling = False
 def on_button_down(ev):
+  global btn_wheeling
   name = BUTTON_NAMES[ev.button]
+  if name == BUTTON_WHEEL:
+    btn_wheeling = True
+    print("Mouse wheel enabled")
   if name in BUTTON_MAP:
     keydev.emit(BUTTON_MAP[name], 1)
 
 def on_button_up(ev):
+  global btn_wheeling
   name = BUTTON_NAMES[ev.button]
+  if name == BUTTON_WHEEL:
+    btn_wheeling = False
+    print("Mouse wheel disabled")
   if name in BUTTON_MAP:
     keydev.emit(BUTTON_MAP[name], 0)
 
@@ -118,24 +132,38 @@ def on_hat_motion(ev):
         keydev.emit(HAT_MAP[k], values[k])
       tracker_hat[k] = values[k]
 
-tracker_ax = {}
+track_axis_wheel = {}
+track_axis_move = {}
 def update_axis_motion():
-  global tracker_ax
+  global track_axis_wheel, track_axis_move, btn_wheeling
+  if btn_wheeling:
+    track_axis_move = {}
+    tracker = track_axis_wheel
+  else:
+    track_axis_wheel = {}
+    tracker = track_axis_move
   axises = AXIS_MAP.keys()
   for k in axises:
-    if not k in tracker_ax:
-      tracker_ax[k] = {'delta':0,'count':0}
+    if not k in tracker:
+      tracker[k] = {'val':0,'count':0}
     val = joystick.get_axis(k)
     if val > -0.5 and val < 0.5:
-      tracker_ax[k] = {'delta':0,'count':0}
+      tracker[k] = {'val':0,'count':0}
       continue
-    delta = -1 if val <= -0.5 else 1
-    if not delta == tracker_ax[k]['delta']: # First triggered
-      tracker_ax[k] = {'delta':delta,'count':1}
+    lastval = tracker[k]['val']
+    count = tracker[k]['count']
+    if abs(val) < abs(lastval): # Roll back
+      continue
+    delta = -1 if val < 0 else 1
+    if btn_wheeling:
+      if (count % 2)==0:
+        keydev.emit(uinput.REL_WHEEL, -delta)
     else:
-      tracker_ax[k]['count'] += 1
-    speed = min(tracker_ax[k]['count'], 20)
-    keydev.emit(AXIS_MAP[k], delta*speed)
+      count = min(count, 10)
+      speed = int(pow(2, count*0.5))
+      keydev.emit(AXIS_MAP[k], delta*speed)
+    tracker[k]['val'] = val
+    tracker[k]['count'] += 1
 
 def update_hat_motion():
   (x, y) = joystick.get_hat(0)
@@ -164,7 +192,8 @@ while not done:
         print("Joystick button up.", event)
         on_button_up(event)
       elif event.type == pygame.JOYAXISMOTION:
-        print("Joystick axis motion.", event)
+        pass
+        #print("Joystick axis motion.", event)
         #on_axis_motion(event)
       elif event.type == pygame.JOYBALLMOTION:
         print("Joystick ball motion.", event)
